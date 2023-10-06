@@ -1,9 +1,9 @@
-import { utility } from "@shd101wyy/mume";
-import * as fs from "fs";
-import * as path from "path";
-import * as vscode from "vscode";
-
-import { isMarkdownFile } from "./preview-content-provider";
+import { utility } from 'crossnote';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { getMPEConfig } from './config';
+import { getWorkspaceFolderUri, isMarkdownFile } from './utils';
 
 /**
  * Copy ans paste image at imageFilePath to config.imageForlderPath.
@@ -11,26 +11,29 @@ import { isMarkdownFile } from "./preview-content-provider";
  * @param uri
  * @param imageFilePath
  */
-export function pasteImageFile(sourceUri: any, imageFilePath: string) {
-  if (typeof sourceUri === "string") {
-    sourceUri = vscode.Uri.parse(sourceUri);
+export function pasteImageFile(sourceUri: string, imageFilePath: string) {
+  const uri = vscode.Uri.parse(sourceUri);
+
+  const imageFolderPath =
+    vscode.workspace
+      .getConfiguration('markdown-preview-enhanced')
+      .get<string>('imageFolderPath') ?? '';
+  let imageFileName = path.basename(imageFilePath);
+  const projectDirectoryPath = getWorkspaceFolderUri(uri).fsPath;
+  if (!projectDirectoryPath) {
+    return vscode.window.showErrorMessage('Cannot find workspace');
   }
 
-  const imageFolderPath = vscode.workspace
-    .getConfiguration("markdown-preview-enhanced")
-    .get<string>("imageFolderPath");
-  let imageFileName = path.basename(imageFilePath);
-  const projectDirectoryPath = vscode.workspace.rootPath;
   let assetDirectoryPath;
   let description;
-  if (imageFolderPath[0] === "/") {
+  if (imageFolderPath[0] === '/') {
     assetDirectoryPath = path.resolve(
       projectDirectoryPath,
-      "." + imageFolderPath,
+      '.' + imageFolderPath,
     );
   } else {
     assetDirectoryPath = path.resolve(
-      path.dirname(sourceUri.fsPath),
+      path.dirname(uri.fsPath),
       imageFolderPath,
     );
   }
@@ -44,16 +47,16 @@ export function pasteImageFile(sourceUri: any, imageFilePath: string) {
     .filter(
       (editor) =>
         isMarkdownFile(editor.document) &&
-        editor.document.uri.fsPath === sourceUri.fsPath,
+        editor.document.uri.fsPath === uri.fsPath,
     )
     .forEach((editor) => {
       fs.mkdir(assetDirectoryPath, (error) => {
         fs.stat(destPath, (err, stat) => {
           if (err == null) {
             // file existed
-            const lastDotOffset = imageFileName.lastIndexOf(".");
+            const lastDotOffset = imageFileName.lastIndexOf('.');
             const uid =
-              "_" +
+              '_' +
               Math.random()
                 .toString(36)
                 .substr(2, 9);
@@ -74,16 +77,16 @@ export function pasteImageFile(sourceUri: any, imageFilePath: string) {
                 path.resolve(assetDirectoryPath, imageFileName),
               ),
             );
-          } else if (err.code === "ENOENT") {
+          } else if (err.code === 'ENOENT') {
             // file doesn't exist
             fs.createReadStream(imageFilePath).pipe(
               fs.createWriteStream(destPath),
             );
 
-            if (imageFileName.lastIndexOf(".")) {
+            if (imageFileName.lastIndexOf('.')) {
               description = imageFileName.slice(
                 0,
-                imageFileName.lastIndexOf("."),
+                imageFileName.lastIndexOf('.'),
               );
             } else {
               description = imageFileName;
@@ -97,8 +100,8 @@ export function pasteImageFile(sourceUri: any, imageFilePath: string) {
           );
 
           let url = `${imageFolderPath}/${imageFileName}`;
-          if (url.indexOf(" ") >= 0) {
-            url = url.replace(/ /g, "%20");
+          if (url.indexOf(' ') >= 0) {
+            url = url.replace(/ /g, '%20');
           }
 
           editor.edit((textEditorEdit) => {
@@ -142,8 +145,8 @@ function setUploadedImageURL(
   curPos: vscode.Position,
 ) {
   let description;
-  if (imageFileName.lastIndexOf(".")) {
-    description = imageFileName.slice(0, imageFileName.lastIndexOf("."));
+  if (imageFileName.lastIndexOf('.')) {
+    description = imageFileName.slice(0, imageFileName.lastIndexOf('.'));
   } else {
     description = imageFileName;
   }
@@ -173,7 +176,7 @@ export function uploadImageFile(
   imageUploader: string,
 ) {
   // console.log('uploadImageFile', sourceUri, imageFilePath, imageUploader)
-  if (typeof sourceUri === "string") {
+  if (typeof sourceUri === 'string') {
     sourceUri = vscode.Uri.parse(sourceUri);
   }
   const imageFileName = path.basename(imageFilePath);
@@ -195,13 +198,10 @@ export function uploadImageFile(
         textEditorEdit.insert(curPos, hint);
       });
 
-      const config = vscode.workspace.getConfiguration(
-        "markdown-preview-enhanced",
-      );
-      const AccessKey = config.get<string>("AccessKey") || "";
-      const SecretKey = config.get<string>("SecretKey") || "";
-      const Bucket = config.get<string>("Bucket") || "";
-      const Domain = config.get<string>("Domain") || "";
+      const AccessKey = getMPEConfig<string>('qiniuAccessKey') || '';
+      const SecretKey = getMPEConfig<string>('qiniuSecretKey') || '';
+      const Bucket = getMPEConfig<string>('qiniuBucket') || '';
+      const Domain = getMPEConfig<string>('qiniuDomain') || '';
 
       utility
         .uploadImage(imageFilePath, {

@@ -1,7 +1,7 @@
 {
   "name": "markdown-preview-enhanced",
   "displayName": "%displayName%",
-  "version": "0.6.2",
+  "version": "0.8.0",
   "description": "%description%",
   "categories": [
     "Other"
@@ -20,21 +20,22 @@
     "gabyx"
   ],
   "publisher": "shd101wyy",
-  "main": "./out/src/extension",
+  "main": "./out/native/extension.js",
+  "browser": "./out/web/extension.js",
   "scripts": {
-    "check": "npm run check:eslint && npm run check:prettier && npm run check:tsc && npm run check:tslint",
+    "build": "gulp copy-files && gulp clean-out && node build.js",
+    "check:all": "yarn check:eslint && yarn check:prettier",
     "check:eslint": "eslint \"**/*\"",
     "check:prettier": "prettier --check \"**/*.*\"",
-    "check:tsc": "tsc --project . --noEmit",
-    "check:tslint": "tslint --project .",
-    "compile": "tsc -p ./",
-    "fix": "npm run fix:eslint && npm run fix:tslint && npm run fix:prettier",
+    "fix:all": "yarn fix:eslint && yarn fix:eslint && yarn fix:prettier",
     "fix:eslint": "eslint --fix \"**/*\"",
     "fix:prettier": "prettier --write \"**/*.*\"",
-    "fix:tslint": "tslint --project .",
-    "test": "npm run compile && node ./node_modules/vscode/bin/test",
-    "vscode:prepublish": "npm run compile",
-    "watch": "tsc -watch -p ./"
+    "prepare": "husky install",
+    "run-in-browser": "concurrently \"vscode-test-web --browserType=chromium --extensionDevelopmentPath=. $SERVE_DIR\" \"npx http-server ./crossnote -p 6789 --cors\"",
+    "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
+    "test": "yarn build && node ./node_modules/vscode/bin/test",
+    "vscode:prepublish": "yarn install && yarn build",
+    "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
   "contributes": {
     "commands": [
@@ -86,7 +87,12 @@
       },
       {
         "command": "markdown-preview-enhanced.customizeCss",
-        "title": "%markdown-preview-enhanced.customizeCss.title%"
+        "title": "%markdown-preview-enhanced.customizeCss.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.customizeCssInWorkspace",
+        "title": "%markdown-preview-enhanced.customizeCssInWorkspace.title%"
       },
       {
         "command": "markdown-preview-enhanced.insertNewSlide",
@@ -102,27 +108,40 @@
       },
       {
         "command": "markdown-preview-enhanced.createTOC",
-        "title": "%markdown-preview-enhanced.createTOC.title%"
+        "title": "%markdown-preview-enhanced.createTOC.title%",
+        "enablement": "!isWeb"
       },
       {
-        "command": "markdown-preview-enhanced.openMermaidConfig",
-        "title": "%markdown-preview-enhanced.openMermaidConfig.title%"
-      },
-      {
-        "command": "markdown-preview-enhanced.openMathJaxConfig",
-        "title": "%markdown-preview-enhanced.openMathJaxConfig.title%"
-      },
-      {
-        "command": "markdown-preview-enhanced.openKaTeXConfig",
-        "title": "%markdown-preview-enhanced.openKaTeXConfig.title%"
+        "command": "markdown-preview-enhanced.openConfigScript",
+        "title": "%markdown-preview-enhanced.openConfigScript.title%",
+        "enablement": "!isWeb"
       },
       {
         "command": "markdown-preview-enhanced.extendParser",
-        "title": "%markdown-preview-enhanced.extendParser.title%"
+        "title": "%markdown-preview-enhanced.extendParser.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.customizePreviewHtmlHead",
+        "title": "%markdown-preview-enhanced.customizePreviewHtmlHead.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.openConfigScriptInWorkspace",
+        "title": "%markdown-preview-enhanced.openConfigScriptInWorkspace.title%"
+      },
+      {
+        "command": "markdown-preview-enhanced.extendParserInWorkspace",
+        "title": "%markdown-preview-enhanced.extendParserInWorkspace.title%"
+      },
+      {
+        "command": "markdown-preview-enhanced.customizePreviewHtmlHeadInWorkspace",
+        "title": "%markdown-preview-enhanced.customizePreviewHtmlHeadInWorkspace.title%"
       },
       {
         "command": "markdown-preview-enhanced.showUploadedImages",
-        "title": "%markdown-preview-enhanced.showUploadedImages.title%"
+        "title": "%markdown-preview-enhanced.showUploadedImages.title%",
+        "enablement": "!isWeb"
       }
     ],
     "configuration": {
@@ -130,7 +149,7 @@
       "title": "Markdown Preview Enhanced",
       "properties": {
         "markdown-preview-enhanced.configPath": {
-          "description": "The configuration directory path. Leave it empty to use '~/.mume' as the config path. Please reload vscode to take effect.",
+          "markdownDescription": "Restart is required after changes. The global configuration directory path. Leave it empty to use `$HOME/.crossnote` for Windows or `$XDG_CONFIG_HOME/.crossnote` or `$HOME/.local/state/crossnote` as the config path.",
           "default": "",
           "type": "string"
         },
@@ -154,15 +173,34 @@
           "default": true,
           "type": "boolean"
         },
-        "markdown-preview-enhanced.singlePreview": {
-          "description": "Open Only One Preview.",
-          "default": true,
-          "type": "boolean"
+        "markdown-preview-enhanced.previewMode": {
+          "markdownDescription": "- **Single Preview**: Only one preview will be shown for all editors.\n- **Multiple Previews**: Multiple previews will be shown. Each editor has its own preview.\n- **Previews Only**: No editor will be shown. Only previews will be shown. You can use the in-preview editor to edit the markdown.\n\nRestart is required after changes.",
+          "type": "string",
+          "enum": [
+            "Single Preview",
+            "Multiple Previews",
+            "Previews Only"
+          ],
+          "default": "Single Preview"
         },
         "markdown-preview-enhanced.automaticallyShowPreviewOfMarkdownBeingEdited": {
           "description": "Automatically show preview of markdown being edited.",
           "default": false,
           "type": "boolean"
+        },
+        "markdown-preview-enhanced.previewColorScheme": {
+          "type": "string",
+          "enum": [
+            "selectedPreviewTheme",
+            "systemColorScheme",
+            "editorColorScheme"
+          ],
+          "default": "selectedPreviewTheme",
+          "markdownEnumDescriptions": [
+            "Use the `markdown-preview-enhanced.previewTheme` setting.",
+            "Follow system color scheme. If set to true, then the theme of markdown preview will automatically switch between light and dark when your system switch between light and dark. For example, if you set the current preview theme to `github-light.css`, then when your system is dark, the preview theme will be switched to `github-dark.css` automatically. If set to false, then the theme of markdown preview will not be changed automatically.",
+            "Use the same theme as the editor (light or dark). If set to true, then the theme of markdown preview will automatically switch between light and dark when you switch between vscode light and dark theme. For example, if you set the current preview theme to `github-light.css`, then when you switch to vscode dark theme, the preview theme will be switched to `github-dark.css` automatically. If set to false, then the theme of markdown preview will not be changed automatically."
+          ]
         },
         "markdown-preview-enhanced.enableTypographer": {
           "description": "Enable smartypants and other sweet transforms.",
@@ -217,6 +255,11 @@
             "https://latex.codecogs.com/png.latex"
           ]
         },
+        "markdown-preview-enhanced.mathjaxV3ScriptSrc": {
+          "description": "MathJax v3 script source. Leave it empty to use the default CDN.",
+          "default": "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
+          "type": "string"
+        },
         "markdown-preview-enhanced.enableWikiLinkSyntax": {
           "description": "Enable Wiki Link syntax support. More information can be found at https://help.github.com/articles/adding-links-to-wikis/",
           "default": true,
@@ -229,13 +272,8 @@
         },
         "markdown-preview-enhanced.useGitHubStylePipedLink": {
           "description": "If checked, we use GitHub style piped wiki links, i.e. [[linkText|wikiLink]]. Otherwise, we use [[wikiLink|linkText]] as the original Wikipedia style.",
-          "default": true,
+          "default": false,
           "type": "boolean"
-        },
-        "markdown-preview-enhanced.wikiLinkFileExtension": {
-          "description": "By default, the extension for wikilink is `.md`. For example: [[test]] will direct to file path `test.md`.",
-          "default": ".md",
-          "type": "string"
         },
         "markdown-preview-enhanced.enableEmojiSyntax": {
           "description": "Enable emoji & font-awesome plugin. This only works for markdown-it parser, but not pandoc parser.",
@@ -287,6 +325,7 @@
             "dark.css",
             "funky.css",
             "github.css",
+            "github-dark.css",
             "hopscotch.css",
             "monokai.css",
             "okaidia.css",
@@ -323,6 +362,24 @@
             "solarized-dark.css",
             "solarized-light.css",
             "vue.css"
+          ],
+          "markdownEnumDescriptions": [
+            "Atom Dark",
+            "Atom Light",
+            "Atom Material",
+            "GitHub Dark",
+            "GitHub Light",
+            "Gothic",
+            "Medium",
+            "Monokai",
+            "Newsprint",
+            "Night",
+            "None",
+            "One Dark",
+            "One Light",
+            "Solarized Dark",
+            "Solarized Light",
+            "Vue"
           ]
         },
         "markdown-preview-enhanced.revealjsTheme": {
@@ -364,22 +421,22 @@
             "qiniu"
           ]
         },
-        "markdown-preview-enhanced.AccessKey": {
+        "markdown-preview-enhanced.qiniuAccessKey": {
           "type": "string",
           "default": "",
           "description": "Qiniu AccessKey"
         },
-        "markdown-preview-enhanced.SecretKey": {
+        "markdown-preview-enhanced.qiniuSecretKey": {
           "type": "string",
           "default": "",
           "description": "Qiniu SecretKey"
         },
-        "markdown-preview-enhanced.Bucket": {
+        "markdown-preview-enhanced.qiniuBucket": {
           "type": "string",
           "default": "",
           "description": "Qiniu Bucket"
         },
-        "markdown-preview-enhanced.Domain": {
+        "markdown-preview-enhanced.qiniuDomain": {
           "type": "string",
           "default": "http://",
           "description": "Qiniu Domain"
@@ -462,11 +519,6 @@
           "default": 0,
           "type": "number"
         },
-        "markdown-preview-enhanced.usePuppeteerCore": {
-          "description": "If set to true, then locally installed puppeteer-core will be required. Otherwise, the puppeteer globally installed by `npm install -g puppeteer` will be required.",
-          "default": true,
-          "type": "boolean"
-        },
         "markdown-preview-enhanced.puppeteerArgs": {
           "description": "Args passed to puppeteer.launch({args: $puppeteerArgs})",
           "default": [],
@@ -481,9 +533,54 @@
           "description": "Hide the default VSCode markdown preview extension buttons. Restarting the editor is required to make this config take effect.",
           "default": true,
           "type": "boolean"
+        },
+        "markdown-preview-enhanced.jsdelivrCdnHost": {
+          "markdownDescription": "jsDelivr CDN host. Example values: `cdn.jsdelivr.net`, `fastly.jsdelivr.net`, `gcore.jsdelivr.net`, `testingcf.jsdelivr.net`",
+          "default": "cdn.jsdelivr.net",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.plantumlJarPath": {
+          "description": "Absolute path to the plantuml.jar file (`java` is required in system path).",
+          "default": "",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.krokiServer": {
+          "description": "The URL of the Kroki server to use.  ",
+          "default": "https://kroki.io",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.markdownFileExtensions": {
+          "description": "Markdown file extensions. This is used to determine whether to show the preview button in the markdown file context menu.",
+          "default": [
+            ".md",
+            ".markdown",
+            ".mdown",
+            ".mkdn",
+            ".mkd",
+            ".rmd",
+            ".qmd"
+          ],
+          "type": "array"
+        },
+        "markdown-preview-enhanced.alwaysShowBacklinksInPreview": {
+          "description": "Always show backlinks in preview.",
+          "default": false,
+          "type": "boolean"
         }
       }
     },
+    "customEditors": [
+      {
+        "viewType": "markdown-preview-enhanced",
+        "displayName": "%customEditorPreviewDisplayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.{md,markdown,mdown,mkdn,mkd,rmd,qmd}"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "keybindings": [
       {
         "command": "markdown-preview-enhanced.openPreviewToTheSide",
@@ -532,7 +629,7 @@
   },
   "activationEvents": [
     "onLanguage:markdown",
-    "onCommand:markdown-preview-enhanced.openPreviewToTheSide"
+    "onLanguage:quarto"
   ],
   "husky": {
     "hooks": {
@@ -542,31 +639,41 @@
   "lint-staged": {
     "**/*.*": [
       "eslint",
-      "prettier --write",
-      "git add"
+      "prettier --write"
     ]
   },
   "dependencies": {
-    "@shd101wyy/mume": "^0.7.0",
-    "@types/vfile": "^3.0.2"
+    "@types/crypto-js": "^4.1.2",
+    "@types/vfile": "^3.0.2",
+    "async-mutex": "^0.4.0",
+    "crossnote": "^0.8.18",
+    "crypto-js": "^4.1.1"
   },
   "devDependencies": {
-    "@types/cheerio": "^0.22.18",
-    "@types/jquery": "^3.3.9",
+    "@types/cheerio": "0.22.11",
     "@types/mocha": "^5.2.5",
-    "@types/node": "^11.11.0",
-    "@types/vscode": "1.40.0",
-    "eslint": "^5.15.1",
-    "husky": "^3.0.9",
+    "@types/node": "16",
+    "@types/vscode": "1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.5.0",
+    "@typescript-eslint/parser": "^6.5.0",
+    "@vscode/test-web": "^0.0.45",
+    "concurrently": "^8.2.1",
+    "esbuild": "^0.19.2",
+    "esbuild-plugin-polyfill-node": "^0.3.0",
+    "eslint": "^8.48.0",
+    "gulp": "^4.0.2",
+    "http-server": "^14.1.1",
+    "husky": "^8.0.3",
     "lint-staged": "^9.4.2",
     "mocha": "^6.1.4",
     "prettier": "^1.18.2",
     "prettier-plugin-packagejson": "^2.0.1",
-    "tslint": "^5.13.1",
-    "tslint-config-prettier": "^1.18.0",
-    "typescript": "^3.0.3"
+    "ts-loader": "^9.4.4",
+    "typescript": "^5.2.2",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4"
   },
   "engines": {
-    "vscode": "^1.40.0"
+    "vscode": "^1.80.0"
   }
 }
