@@ -1,5 +1,5 @@
 // For both node.js and browser environments
-import { PreviewMode, utility } from 'crossnote';
+import { HeadingIdGenerator, PreviewMode, utility } from 'crossnote';
 import { SHA256 } from 'crypto-js';
 import * as vscode from 'vscode';
 import { PreviewColorScheme, getMPEConfig, updateMPEConfig } from './config';
@@ -9,7 +9,7 @@ import { PreviewCustomEditorProvider } from './preview-custom-editor-provider';
 import { PreviewProvider, getPreviewUri } from './preview-provider';
 import {
   getBottomVisibleLine,
-  getEditorActiveLine,
+  getEditorActiveCursorLine,
   getPreviewMode,
   getTopVisibleLine,
   getWorkspaceFolderUri,
@@ -64,7 +64,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     previewProvider.initPreview({
       sourceUri: uri,
       document: editor.document,
-      activeLine: getEditorActiveLine(editor),
+      cursorLine: getEditorActiveCursorLine(editor),
       viewOptions: {
         viewColumn: vscode.ViewColumn.Two,
         preserveFocus: true,
@@ -85,7 +85,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     previewProvider.initPreview({
       sourceUri: uri,
       document: editor.document,
-      activeLine: getEditorActiveLine(editor),
+      cursorLine: getEditorActiveCursorLine(editor),
       viewOptions: {
         viewColumn: vscode.ViewColumn.One,
         preserveFocus: false,
@@ -131,7 +131,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     const editor = vscode.window.activeTextEditor;
     if (editor && editor.document && editor.edit) {
       editor.edit((textEdit) => {
-        textEdit.insert(editor.selection.active, '<!-- slide -->\n');
+        textEdit.insert(editor.selection.active, '<!-- slide -->\n\n');
       });
     }
   }
@@ -140,7 +140,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     const editor = vscode.window.activeTextEditor;
     if (editor && editor.document && editor.edit) {
       editor.edit((textEdit) => {
-        textEdit.insert(editor.selection.active, '<!-- pagebreak -->\n');
+        textEdit.insert(editor.selection.active, '<!-- pagebreak -->\n\n');
       });
     }
   }
@@ -268,11 +268,11 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
   }
 
   /*
-	function cacheSVG(uri, code, svg) {
-		const sourceUri = vscode.Uri.parse(uri);
-		contentProvider.cacheSVG(sourceUri, code, svg)
-	}
-	*/
+  function cacheSVG(uri, code, svg) {
+    const sourceUri = vscode.Uri.parse(uri);
+    contentProvider.cacheSVG(sourceUri, code, svg)
+  }
+  */
 
   async function cacheCodeChunkResult(uri, id, result) {
     const sourceUri = vscode.Uri.parse(uri);
@@ -380,6 +380,14 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
 
   function setPreviewTheme(uri, theme) {
     updateMPEConfig('previewTheme', theme, true);
+  }
+
+  function togglePreviewZenMode(uri) {
+    updateMPEConfig(
+      'enablePreviewZenMode',
+      !getMPEConfig<boolean>('enablePreviewZenMode'),
+      true,
+    );
   }
 
   function setCodeBlockTheme(uri, theme) {
@@ -549,7 +557,14 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
 
       if (fileExists) {
         const previewMode = getPreviewMode();
-        const document = await vscode.workspace.openTextDocument(fileUri);
+        const document = await vscode.workspace.openTextDocument(
+          vscode.Uri.parse(
+            openFilePath
+              .split('#')
+              .slice(0, -1)
+              .join('#') || openFilePath,
+          ),
+        );
         // Open custom editor
         if (
           previewMode === PreviewMode.PreviewsOnly &&
@@ -573,7 +588,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           previewProvider.initPreview({
             sourceUri: fileUri,
             document,
-            activeLine: line,
+            cursorLine: line,
             viewOptions: {
               viewColumn: vscode.ViewColumn.Active,
               preserveFocus: true,
@@ -581,7 +596,9 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           });
         } else {
           // Open fileUri
-          const editor = await vscode.window.showTextDocument(document, col);
+          const editor = await vscode.window.showTextDocument(document, {
+            viewColumn: col,
+          });
           // if there was line fragment, jump to line
           if (line >= 0) {
             let viewPos = vscode.TextEditorRevealType.InCenter;
@@ -591,6 +608,32 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
             const sel = new vscode.Selection(line, 0, line, 0);
             editor.selection = sel;
             editor.revealRange(sel, viewPos);
+          } else if (fileUri.fragment) {
+            // Normal fragment
+            // Find heading with this id
+            const headingIdGenerator = new HeadingIdGenerator();
+            const text = editor.document.getText();
+            const lines = text.split('\n');
+            let i = 0;
+            for (i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              if (line.match(/^#+\s+/)) {
+                const heading = line.replace(/^#+\s+/, '');
+                const headingId = headingIdGenerator.generateId(heading);
+                if (headingId === fileUri.fragment) {
+                  // Reveal editor line
+                  let viewPos = vscode.TextEditorRevealType.InCenter;
+                  if (editor.selection.active.line === i) {
+                    viewPos =
+                      vscode.TextEditorRevealType.InCenterIfOutsideViewport;
+                  }
+                  const sel = new vscode.Selection(i, 0, i, 0);
+                  editor.selection = sel;
+                  editor.revealRange(sel, viewPos);
+                  break;
+                }
+              }
+            }
           }
         }
       } else {
@@ -711,6 +754,33 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.workspace.onDidDeleteFiles(async ({ files }) => {
+      for (const file of files) {
+        // Check if there is change under `${workspaceDir}/.crossnote` directory
+        // and filename is in one of below
+        // - style.less
+        // - config.js
+        // - parser.js
+        // - head.html
+        // If so, refresh the preview of the workspace.
+        const workspaceUri = getWorkspaceFolderUri(file);
+        const workspaceDir = workspaceUri.fsPath;
+        const relativePath = path.relative(workspaceDir, file.fsPath);
+        if (
+          relativePath.startsWith('.crossnote') &&
+          ['style.less', 'config.js', 'parser.js', 'head.html'].includes(
+            path.basename(relativePath),
+          )
+        ) {
+          const provider = await getPreviewContentProvider(file);
+          await notebooksManager.updateNotebookConfig(workspaceUri);
+          provider.refreshAllPreviews();
+        }
+      }
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(async (event) => {
       if (isMarkdownFile(event.document)) {
         const previewProvider = await getPreviewContentProvider(
@@ -814,7 +884,20 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
    */
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+      // Check if editor and document exist
       if (editor && editor.document && editor.document.uri) {
+        // Get the list of schemes to exclude from the configuration
+        const exclusionSchemes =
+          getMPEConfig<string[]>('disableAutoPreviewForUriSchemes') ?? [];
+
+        // Check if the current document's scheme should be excluded
+        for (const scheme of exclusionSchemes) {
+          if (editor.document.uri.scheme.startsWith(scheme)) {
+            return; // Don't trigger preview if scheme matches exclusion list
+          }
+        }
+
+        // Original check: Proceed only if it's considered a Markdown file
         if (isMarkdownFile(editor.document)) {
           const sourceUri = editor.document.uri;
           const automaticallyShowPreviewOfMarkdownBeingEdited = getMPEConfig<
@@ -834,7 +917,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
               previewProvider.initPreview({
                 sourceUri,
                 document: editor.document,
-                activeLine: getEditorActiveLine(editor),
+                cursorLine: getEditorActiveCursorLine(editor),
                 viewOptions: {
                   viewColumn:
                     previewProvider.getPreviews(sourceUri)?.at(0)?.viewColumn ??
@@ -878,10 +961,10 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
   */
 
   /*
-	context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors(textEditors=> {
-		// console.log('onDidChangeonDidChangeVisibleTextEditors ', textEditors)
-	}))
-	*/
+  context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors(textEditors=> {
+    // console.log('onDidChangeonDidChangeVisibleTextEditors ', textEditors)
+  }))
+  */
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -1073,6 +1156,13 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       '_crossnote.setPreviewTheme',
       setPreviewTheme,
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.togglePreviewZenMode',
+      togglePreviewZenMode,
     ),
   );
 

@@ -11,9 +11,9 @@ import {
   PreviewMode,
   PreviewTheme,
   RevealJsTheme,
+  WikiLinkTargetFileNameChangeCase,
   getDefaultNotebookConfig,
 } from 'crossnote';
-import { JsonObject } from 'type-fest';
 import * as vscode from 'vscode';
 import { isVSCodeWebExtension } from './utils';
 
@@ -29,13 +29,15 @@ type VSCodeMPEConfigKey =
   | 'imageUploader'
   | 'hideDefaultVSCodeMarkdownPreviewButtons'
   | 'liveUpdate'
+  | 'liveUpdateDebounceMs'
   | 'previewColorScheme'
   | 'previewMode'
   | 'qiniuAccessKey'
   | 'qiniuBucket'
   | 'qiniuDomain'
   | 'qiniuSecretKey'
-  | 'scrollSync';
+  | 'scrollSync'
+  | 'disableAutoPreviewForUriSchemes';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;
 
@@ -88,11 +90,14 @@ export class MarkdownPreviewEnhancedConfig implements NotebookConfig {
   public readonly jsdelivrCdnHost: string;
   public readonly krokiServer: string;
   public readonly alwaysShowBacklinksInPreview: boolean;
+  public readonly enablePreviewZenMode: boolean;
+  public readonly wikiLinkTargetFileExtension: string;
+  public readonly wikiLinkTargetFileNameChangeCase: WikiLinkTargetFileNameChangeCase;
   // Don't set values for these properties in constructor:
   public readonly includeInHeader: string;
   public readonly globalCss: string;
   public readonly mermaidConfig: MermaidConfig;
-  public readonly mathjaxConfig: JsonObject;
+  public readonly mathjaxConfig: any;
   public readonly katexConfig: KatexOptions;
   public readonly parserConfig: ParserConfig;
   public readonly isVSCode: boolean = true;
@@ -102,6 +107,7 @@ export class MarkdownPreviewEnhancedConfig implements NotebookConfig {
   public readonly hideDefaultVSCodeMarkdownPreviewButtons: boolean;
   public readonly imageUploader: ImageUploader;
   public readonly liveUpdate: boolean;
+  public readonly liveUpdateDebounceMs: number;
   public readonly previewColorScheme: PreviewColorScheme;
   public readonly previewMode: PreviewMode;
   public readonly scrollSync: boolean;
@@ -197,6 +203,8 @@ export class MarkdownPreviewEnhancedConfig implements NotebookConfig {
 
     this.scrollSync = getMPEConfig<boolean>('scrollSync') ?? true;
     this.liveUpdate = getMPEConfig<boolean>('liveUpdate') ?? true;
+    this.liveUpdateDebounceMs =
+      getMPEConfig<number>('liveUpdateDebounceMs') ?? 300;
     this.previewMode =
       getMPEConfig<PreviewMode>('previewMode') ?? PreviewMode.SinglePreview;
     this.automaticallyShowPreviewOfMarkdownBeingEdited =
@@ -244,6 +252,16 @@ export class MarkdownPreviewEnhancedConfig implements NotebookConfig {
     this.alwaysShowBacklinksInPreview =
       getMPEConfig<boolean>('alwaysShowBacklinksInPreview') ??
       defaultConfig.alwaysShowBacklinksInPreview;
+    this.enablePreviewZenMode =
+      getMPEConfig<boolean>('enablePreviewZenMode') ??
+      defaultConfig.enablePreviewZenMode;
+    this.wikiLinkTargetFileExtension =
+      getMPEConfig<string>('wikiLinkTargetFileExtension') ??
+      defaultConfig.wikiLinkTargetFileExtension;
+    this.wikiLinkTargetFileNameChangeCase =
+      getMPEConfig<WikiLinkTargetFileNameChangeCase>(
+        'wikiLinkTargetFileNameChangeCase',
+      ) ?? defaultConfig.wikiLinkTargetFileNameChangeCase;
   }
 
   public isEqualTo(otherConfig: MarkdownPreviewEnhancedConfig) {

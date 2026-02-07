@@ -88,14 +88,19 @@ class NotebooksManager {
       getWorkspaceFolderUri(uri),
       './.crossnote',
     );
-    try {
-      workspaceConfig = await loadConfigsInDirectory(
-        workspaceConfigPath.fsPath,
-        notebook.fs,
-        createWorkspaceConfigDirectoryIfNotExists,
-      );
-    } catch (error) {
-      console.error(error);
+    if (
+      (await notebook.fs.exists(workspaceConfigPath.fsPath)) ||
+      createWorkspaceConfigDirectoryIfNotExists
+    ) {
+      try {
+        workspaceConfig = await loadConfigsInDirectory(
+          workspaceConfigPath.fsPath,
+          notebook.fs,
+          createWorkspaceConfigDirectoryIfNotExists,
+        );
+      } catch (error) {
+        console.error(error);
+      }
     }
 
     // VSCode config
@@ -112,6 +117,8 @@ class NotebooksManager {
       ...vscodeMPEConfig,
       ...globalConfig,
       ...workspaceConfig,
+      globalCss:
+        (globalConfig.globalCss ?? '') + (workspaceConfig.globalCss ?? ''),
       previewTheme,
     };
   }
@@ -146,14 +153,12 @@ class NotebooksManager {
       // Add associations to editorAssociations
       newEditorAssociations = { ...editorAssociations, ...associations };
     } else {
-      // delete associations from editorAssociations
-      newEditorAssociations = Object.fromEntries(
-        Object.entries(editorAssociations).filter(([key]) => {
-          return !markdownFileExtensions.find((ext) => {
-            return key.endsWith(ext);
-          });
-        }),
-      );
+      // delete associations from editorAssociations if exists and value is 'markdown-preview-enhanced'
+      markdownFileExtensions.forEach((ext) => {
+        if (editorAssociations[`*${ext}`] === 'markdown-preview-enhanced') {
+          delete newEditorAssociations[`*${ext}`];
+        }
+      });
     }
 
     if (

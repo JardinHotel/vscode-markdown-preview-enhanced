@@ -86,7 +86,7 @@ export function getAllPreviewProviders(): PreviewProvider[] {
  * One workspace folder has one PreviewProvider
  */
 export class PreviewProvider {
-  private waiting: boolean = false;
+  private updateTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
   /**
    * Each PreviewProvider has a one notebook.
@@ -279,13 +279,13 @@ export class PreviewProvider {
     sourceUri,
     document,
     webviewPanel,
-    activeLine,
+    cursorLine,
     viewOptions,
   }: {
     sourceUri: vscode.Uri;
     document: vscode.TextDocument;
     webviewPanel?: vscode.WebviewPanel;
-    activeLine?: number;
+    cursorLine?: number;
     viewOptions: { viewColumn: vscode.ViewColumn; preserveFocus?: boolean };
   }): Promise<void> {
     // console.log('@initPreview: ', sourceUri);
@@ -311,7 +311,7 @@ export class PreviewProvider {
           sourceUri,
           document,
           viewOptions,
-          activeLine,
+          cursorLine,
         });
       } else {
         previewPanel = PreviewProvider.singlePreviewPanel;
@@ -325,7 +325,7 @@ export class PreviewProvider {
             document,
             webviewPanel: preview,
             viewOptions,
-            activeLine,
+            cursorLine,
           }),
         ),
       );
@@ -412,10 +412,10 @@ export class PreviewProvider {
     // set title
     previewPanel.title = `Preview ${path.basename(sourceUri.fsPath)}`;
 
-    // init markdown engine
+    // init markdown engine.
     let initialLine: number | undefined;
     if (document.uri.fsPath === sourceUri.fsPath) {
-      initialLine = activeLine;
+      initialLine = cursorLine;
     }
 
     const inputString = document.getText() ?? '';
@@ -425,7 +425,7 @@ export class PreviewProvider {
         inputString,
         config: {
           sourceUri: sourceUri.toString(),
-          initialLine,
+          cursorLine: initialLine,
           isVSCode: true,
           scrollSync: getMPEConfig<boolean>('scrollSync'),
           imageUploader: getMPEConfig<ImageUploader>('imageUploader'),
@@ -460,6 +460,9 @@ export class PreviewProvider {
 
     this.previewMaps = new Map();
     this.previewToDocumentMap = new Map();
+    // Clear all pending update timeouts
+    this.updateTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.updateTimeouts.clear();
     // this.engineMaps = {};
     PreviewProvider.singlePreviewPanel = null;
     PreviewProvider.singlePreviewPanelSourceUriTarget = null;
@@ -529,7 +532,7 @@ export class PreviewProvider {
       }
       for (let i = 0; i < previews.length; i++) {
         try {
-          const preview = previews[0];
+          const preview = previews[i];
           const {
             html,
             tocHTML,
@@ -540,7 +543,7 @@ export class PreviewProvider {
             useRelativeFilePath: false,
             hideFrontMatter: false,
             triggeredBySave,
-            vscodePreviewPanel: preview, // TODO:
+            vscodePreviewPanel: preview,
           });
           // check JSAndCssFiles
           if (
@@ -795,14 +798,29 @@ export class PreviewProvider {
       return;
     }
 
-    if (!this.waiting) {
-      this.waiting = true;
-      setTimeout(() => {
-        this.waiting = false;
-        // this._onDidChange.fire(uri);
-        this.updateMarkdown(sourceUri);
-      }, 300);
+    const sourceUriString = sourceUri.toString();
+    const debounceMs = getMPEConfig<number>('liveUpdateDebounceMs') ?? 300;
+
+    // Clear existing timeout for this sourceUri (proper debounce behavior)
+    const existingTimeout = this.updateTimeouts.get(sourceUriString);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.updateTimeouts.delete(sourceUriString);
     }
+
+    // If debounce is 0, update immediately without timeout
+    if (debounceMs === 0) {
+      this.updateMarkdown(sourceUri);
+      return;
+    }
+
+    // Set new timeout
+    const timeout = setTimeout(() => {
+      this.updateTimeouts.delete(sourceUriString);
+      this.updateMarkdown(sourceUri);
+    }, debounceMs);
+
+    this.updateTimeouts.set(sourceUriString, timeout);
   }
 
   public async openImageHelper(sourceUri: Uri) {
